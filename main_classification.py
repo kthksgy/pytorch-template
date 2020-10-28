@@ -65,6 +65,10 @@ parser.add_argument(
     '--padding', help='画像をゼロパディングして32画素×32画素にします。',
     action='store_true'
 )
+parser.add_argument(
+    '--seed', help='乱数生成器のシード値を指定します。',
+    type=int, default=42
+)
 # モデルの保存に関するコマンドライン引数
 parser.add_argument(
     '--save', help='訓練したモデルを保存します。',
@@ -139,11 +143,15 @@ if args.save:
     logger.info(f'モデル保存用のディレクトリ({OUTPUT_MODEL_DIR})を作成しました。')
 
 # 【重要】乱数のシード値の設定(忘れると結果の再現性が無くなる)
-SEED = 0
-random.seed(SEED)  # Python標準のランダムシード
-np.random.seed(SEED)  # NumPyのランダムシード
-torch.manual_seed(SEED)  # PyTorchのランダムシード
-logger.info(f'ランダムシードを{SEED}に設定しました。')
+random.seed(args.seed)  # Python標準のランダムシード
+np.random.seed(args.seed)  # NumPyのランダムシード
+torch.manual_seed(args.seed)  # PyTorchのランダムシード
+# cuDNNは高速化に一部の処理が非決定的に行われる
+# GPUで再現性を確保するために以下の2つを設定する
+# https://pytorch.org/docs/stable/notes/randomness.html
+torch.backends.cudnn.deterministic = True  # cuDNN(GPU)の動作を決定性に設定
+torch.backends.cudnn.benchmark = False  # ベンチマークモードを切る
+logger.info(f'ランダムシードを{args.seed}に設定しました。')
 
 # デバイスについての補助クラスをインスタンス化
 auto_device = AutoDevice(disable_cuda=args.disable_cuda)
@@ -280,6 +288,8 @@ for epoch in range(args.epochs):
 
     # コマンドライン引数でテストモードを指定していたら学習は行わない
     if not args.test:
+        # 訓練モードと評価モードで動作の変わる層が存在するので必ず切り替える
+        model.train()  # モデルを訓練モードに設定
         # tqdmで実行時に進捗を表示するプログレスバーを簡単に作れる
         pbar = tqdm(
             trainloader,
@@ -334,6 +344,7 @@ for epoch in range(args.epochs):
     # テスト時に勾配は必要無い(パラメータ更新を行わないため)ので、
     # 勾配計算を行わない事で計算資源を節約できる
     # テストの処理はパラメータ更新が無い以外は訓練の処理と同じ
+    model.eval()  # モデルを評価モードに設定
     with torch.no_grad():
         pbar = tqdm(
             enumerate(testloader),

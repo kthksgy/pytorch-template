@@ -57,6 +57,10 @@ parser.add_argument(
     type=str, default='binary_cross_entropy',
     choices=['binary_cross_entropy', 'hinge']
 )
+parser.add_argument(
+    '--seed', help='乱数生成器のシード値を指定します。',
+    type=int, default=42
+)
 # 画像生成に関する引数
 parser.add_argument(
     '-z', '--z-dim', help='潜在空間のサイズを指定します。',
@@ -130,12 +134,13 @@ if args.save:
     OUTPUT_MODEL_DIR.mkdir(parents=True)
     logger.info(f'モデル保存用のディレクトリ({OUTPUT_MODEL_DIR})を作成しました。')
 
-# 乱数のシード値の設定
-SEED = 0
-random.seed(SEED)  # Python標準のランダムシード
-np.random.seed(SEED)  # NumPyのランダムシード
-torch.manual_seed(SEED)  # PyTorchのランダムシード
-logger.info(f'ランダムシードを{SEED}に設定しました。')
+# 再現性の設定
+random.seed(args.seed)  # Python標準のランダムシード
+np.random.seed(args.seed)  # NumPyのランダムシード
+torch.manual_seed(args.seed)  # PyTorchのランダムシード
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+logger.info(f'ランダムシードを{args.seed}に設定しました。')
 
 # デバイスについての補助クラスをインスタンス化
 auto_device = AutoDevice(disable_cuda=args.disable_cuda)
@@ -257,6 +262,10 @@ for epoch in range(args.epochs):
 
     # コマンドライン引数でテストモードを指定していたら学習は行わない
     if not args.test:
+        # モデルを訓練モードに設定
+        # DCGANでは2つのモデルがあるので2つとも設定する
+        model_g.train()  # Generatorを訓練モードに設定
+        model_d.train()  # Discriminatorを訓練モードに設定
         pbar = tqdm(
             trainloader,
             desc=f'[{epoch + 1}/{args.epochs}] 訓練開始',
@@ -314,6 +323,8 @@ for epoch in range(args.epochs):
         train_elapsed_time = end_time - begin_time
         results[csv_idx['Train Elapsed Time']] = f'{train_elapsed_time:.07f}'
 
+    model_g.eval()  # Generatorを評価モードに設定
+    model_d.eval()  # Discriminatorを評価モードに設定
     if (
             epoch == 0
             or (epoch + 1) % args.sample_interval == 0
